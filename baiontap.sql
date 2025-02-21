@@ -150,12 +150,16 @@ FROM Orders o
 JOIN Customers c ON o.customer_id = c.customer_id
 JOIN Employees e ON o.employee_id = e.employee_id
 ORDER BY o.order_date DESC;
+SELECT * FROM view_order_list;
+
 -- 8.2
 CREATE VIEW view_order_detail_product AS
 SELECT od.order_detail_id, p.product_name, od.quantity, od.unit_price
 FROM OrderDetails od
 JOIN Products p ON od.product_id = p.product_id
 ORDER BY od.quantity DESC;
+SELECT * FROM view_order_detail_product;
+
 -- 9
 -- 9.1
 DELIMITER //
@@ -171,6 +175,8 @@ BEGIN
     SELECT LAST_INSERT_ID() AS new_employee_id;
 END //
 DELIMITER ;
+CALL proc_insert_employee('John Doe', 'Manager', 5000.00);
+SELECT * FROM Employees WHERE employee_name = 'John Doe';
 -- 9.2
 DELIMITER //
 CREATE PROCEDURE proc_get_orderdetails(
@@ -183,6 +189,8 @@ BEGIN
     WHERE od.order_id = p_order_id;
 END //
 DELIMITER ;
+CALL proc_get_orderdetails(1);
+SELECT * FROM OrderDetails WHERE order_id = 1;
 -- 9.3
 DELIMITER //
 CREATE PROCEDURE proc_cal_total_amount_by_order(
@@ -194,6 +202,65 @@ BEGIN
     WHERE order_id = p_order_id;
 END //
 DELIMITER ;
-
+CALL proc_cal_total_amount_by_order(1);
+SELECT COUNT(DISTINCT product_id) AS total_product_types FROM OrderDetails WHERE order_id = 1;
+-- 10
+DELIMITER //
+CREATE TRIGGER trigger_after_insert_order_details
+AFTER INSERT ON OrderDetails
+FOR EACH ROW
+BEGIN
+    DECLARE stock INT;
+    SELECT quantity INTO stock FROM Products WHERE product_id = NEW.product_id;
+    
+    IF NEW.quantity > stock THEN
+        SIGNAL SQLSTATE '45000'
+        SET MESSAGE_TEXT = 'Số lượng sản phẩm trong kho không đủ';
+    ELSE
+        UPDATE Products
+        SET quantity = quantity - NEW.quantity
+        WHERE product_id = NEW.product_id;
+    END IF;
+END //
+DELIMITER ;
+INSERT INTO OrderDetails (order_id, product_id, quantity, unit_price) VALUES (1, 2, 5, 100.00);
+SELECT * FROM Products WHERE product_id = 2;
+-- 11
+DELIMITER //
+CREATE PROCEDURE proc_insert_order_details(
+    IN p_order_id INT,
+    IN p_product_id INT,
+    IN p_quantity INT,
+    IN p_unit_price DECIMAL(10,2)
+)
+BEGIN
+    DECLARE order_exists INT;
+    DECLARE total_price DECIMAL(10,2);
+    
+    SELECT COUNT(*) INTO order_exists FROM Orders WHERE order_id = p_order_id;
+    
+    IF order_exists = 0 THEN
+        SIGNAL SQLSTATE '45000'
+        SET MESSAGE_TEXT = 'Không tồn tại mã hóa đơn';
+    END IF;
+    
+    START TRANSACTION;
+    
+    INSERT INTO OrderDetails (order_id, product_id, quantity, unit_price)
+    VALUES (p_order_id, p_product_id, p_quantity, p_unit_price);
+    
+    SELECT SUM(quantity * unit_price) INTO total_price 
+    FROM OrderDetails WHERE order_id = p_order_id;
+    
+    UPDATE Orders
+    SET total_amount = total_price
+    WHERE order_id = p_order_id;
+    
+    COMMIT;
+    
+END //
+DELIMITER ;
+CALL proc_insert_order_details(1, 3, 2, 150.00);
+SELECT total_amount FROM Orders WHERE order_id = 1;
 
 
